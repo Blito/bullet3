@@ -14,11 +14,22 @@
 #include "BulletSoftBody/btSoftBodyHelpers.h"
 #include "BulletSoftBody/btSoftBodyRigidBodyCollisionConfiguration.h"
 
+#include "BulletCollision/CollisionDispatch/btCollisionObject.h"
 #include "BulletCollision/NarrowPhaseCollision/btRaycastCallback.h"
 
 #include "../ThirdPartyLibs/Wavefront/tiny_obj_loader.h"
 
 #include <cmath>
+
+struct OrganProperties
+{
+    OrganProperties(float acoustic_impedance)
+        : acoustic_impedance(acoustic_impedance)
+    {}
+
+    static const float void_acoustic_impedance = 1.0f;
+    float acoustic_impedance;
+};
 
 struct SoftBodyFromObjExample : public CommonRigidBodyBase {
     SoftBodyFromObjExample(struct GUIHelperInterface* helper):CommonRigidBodyBase(helper) {}
@@ -119,6 +130,9 @@ void SoftBodyFromObjExample::initPhysics() {
 
     btVector3 scaling(0.1, 0.1, 0.1);
 
+    OrganProperties * properties = new OrganProperties(0.6f);
+    psb->setUserPointer(properties);
+
     btSoftBody::Material* pm=psb->appendMaterial();
     pm->m_kLST =	0.75;
     pm->m_flags -= btSoftBody::fMaterial::DebugDraw;
@@ -190,6 +204,7 @@ void SoftBodyFromObjExample::castRays()
         btVector3 blue(0,0,1);
 
         const unsigned int max_ray_hits = 5;
+        float current_acoustic_impedance = OrganProperties::void_acoustic_impedance;
         const float ray_length = 100;
 
         btVector3 from(-50,1.2,0);
@@ -205,12 +220,27 @@ void SoftBodyFromObjExample::castRays()
 
             if (closestResults.hasHit())
             {
+                OrganProperties * organ_properties = static_cast<OrganProperties*>(closestResults.m_collisionObject->getUserPointer());
+                float acoustic_impedance = organ_properties ? organ_properties->acoustic_impedance : current_acoustic_impedance;
+
+                if (acoustic_impedance == current_acoustic_impedance)
+                {
+                    // We collided two times with the same object, we are leaving it
+                    acoustic_impedance = OrganProperties::void_acoustic_impedance;
+
+                    m_dynamicsWorld->getDebugDrawer()->drawSphere(closestResults.m_hitPointWorld,0.1,red);
+                }
+                else
+                {
+                    m_dynamicsWorld->getDebugDrawer()->drawSphere(closestResults.m_hitPointWorld,0.1,blue);
+                }
 
                 m_dynamicsWorld->getDebugDrawer()->drawLine(from,closestResults.m_hitPointWorld,btVector4(1,0,1,1));
 
-                const btVector3 refraction_direction = snells_law(ray_direction, closestResults.m_hitNormalWorld, 1, 0.6);
+                const btVector3 refraction_direction = snells_law(ray_direction, closestResults.m_hitNormalWorld, current_acoustic_impedance, acoustic_impedance);
                 ray_direction = refraction_direction;
 
+                current_acoustic_impedance = acoustic_impedance;
                 from = closestResults.m_hitPointWorld;
             }
             else
