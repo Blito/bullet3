@@ -18,6 +18,8 @@
 
 #include "../ThirdPartyLibs/Wavefront/tiny_obj_loader.h"
 
+#include <cmath>
+
 struct SoftBodyFromObjExample : public CommonRigidBodyBase {
     SoftBodyFromObjExample(struct GUIHelperInterface* helper):CommonRigidBodyBase(helper) {}
     virtual ~SoftBodyFromObjExample(){}
@@ -56,6 +58,9 @@ struct SoftBodyFromObjExample : public CommonRigidBodyBase {
         float targetPos[3]={3.573,1.454,-0.738};
         m_guiHelper->resetCamera(dist,pitch,yaw,targetPos[0],targetPos[1],targetPos[2]);
     }
+
+    btVector3 snells_law(btVector3 ray_direction, btVector3 surface_normal, float refr_index_1, float refr_index_2);
+
     btSoftBodyWorldInfo softBodyWorldInfo;
 };
 
@@ -174,7 +179,6 @@ void SoftBodyFromObjExample::castRays()
         m_dynamicsWorld->getCollisionObjectArray()[1]->setWorldTransform(tr);
     }
 
-
     ///step the simulation
     if (m_dynamicsWorld)
     {
@@ -185,44 +189,33 @@ void SoftBodyFromObjExample::castRays()
         btVector3 red(1,0,0);
         btVector3 blue(0,0,1);
 
-        ///all hits
+        const unsigned int max_ray_hits = 5;
+        const float ray_length = 100;
+
+        btVector3 from(-50,1.2,0);
+        btVector3 ray_direction(1, 0, 0);
+
+        for (unsigned int ray_i = 0; ray_i < max_ray_hits; ray_i++)
         {
-            btVector3 from(-50,1+up,0);
-            btVector3 to(50,1,0);
-            m_dynamicsWorld->getDebugDrawer()->drawLine(from,to,btVector4(0,0,0,1));
-            btCollisionWorld::AllHitsRayResultCallback allResults(from,to);
-            allResults.m_flags |= btTriangleRaycastCallback::kF_KeepUnflippedNormal;
-            //kF_UseGjkConvexRaytest flag is now enabled by default, use the faster but more approximate algorithm
-            //allResults.m_flags |= btTriangleRaycastCallback::kF_UseSubSimplexConvexCastRaytest;
+            btVector3 to = from * 1.02f + ray_direction * ray_length;
 
-            m_dynamicsWorld->rayTest(from,to,allResults);
-
-            for (int i=0;i<allResults.m_hitFractions.size();i++)
-            {
-                btVector3 p = from.lerp(to,allResults.m_hitFractions[i]);
-                m_dynamicsWorld->getDebugDrawer()->drawSphere(p,0.1,red);
-                m_dynamicsWorld->getDebugDrawer()->drawLine(p,p+allResults.m_hitNormalWorld[i],red);
-            }
-        }
-
-        ///first hit
-        {
-            btVector3 from(-50,1.2,0);
-            btVector3 to(50,1.2,0);
-            m_dynamicsWorld->getDebugDrawer()->drawLine(from,to,btVector4(0,0,1,1));
-
-            btCollisionWorld::ClosestRayResultCallback	closestResults(from,to);
-            closestResults.m_flags |= btTriangleRaycastCallback::kF_FilterBackfaces;
+            btCollisionWorld::ClosestRayResultCallback closestResults(from,to);
 
             m_dynamicsWorld->rayTest(from,to,closestResults);
 
             if (closestResults.hasHit())
             {
 
-                btVector3 p = from.lerp(to,closestResults.m_closestHitFraction);
-                m_dynamicsWorld->getDebugDrawer()->drawSphere(p,0.1,blue);
-                m_dynamicsWorld->getDebugDrawer()->drawLine(p,p+closestResults.m_hitNormalWorld,blue);
+                m_dynamicsWorld->getDebugDrawer()->drawLine(from,closestResults.m_hitPointWorld,btVector4(1,0,1,1));
 
+                const btVector3 refraction_direction = snells_law(ray_direction, closestResults.m_hitNormalWorld, 1, 0.6);
+                ray_direction = refraction_direction;
+
+                from = closestResults.m_hitPointWorld;
+            }
+            else
+            {
+                break;
             }
         }
     }
@@ -233,6 +226,25 @@ void SoftBodyFromObjExample::stepSimulation(float deltaTime)
 {
     castRays();
     CommonRigidBodyBase::stepSimulation(deltaTime);
+}
+
+btVector3 SoftBodyFromObjExample::snells_law(btVector3 ray_direction, btVector3 surface_normal, float refr_index_1, float refr_index_2)
+{
+    // For more details, read https://en.wikipedia.org/wiki/Snell%27s_law#Vector_form
+    float cos_sigma1 = ray_direction.dot(-surface_normal);
+    if (cos_sigma1 < 0.0f)
+    {
+        cos_sigma1 = ray_direction.dot(surface_normal);
+    }
+
+    //btVector3 reflection_dir{ 1 + 2 * cos_sigma1 * surface_normal };
+
+    const btVector3 & l = ray_direction;
+    const btVector3 & n = surface_normal;
+    const float c = cos_sigma1;
+    const float r = refr_index_1 / refr_index_2;
+
+    return btVector3( r * l + (r*c - std::sqrt(1 - r*r * (1 - c*c))) * n );
 }
 
 CommonExampleInterface*    ET_SoftBodyFromObjCreateFunc(CommonExampleOptions& options)
