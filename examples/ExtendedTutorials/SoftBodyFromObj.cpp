@@ -203,49 +203,56 @@ void SoftBodyFromObjExample::castRays()
         btVector3 red(1,0,0);
         btVector3 blue(0,0,1);
 
+        const size_t ray_count = 500;
         const unsigned int max_ray_hits = 5;
-        float current_acoustic_impedance = OrganProperties::void_acoustic_impedance;
         const float ray_length = 100;
+        const btVector3 initial_pos(-50,1.2,-10);
+        const float ray_start_step = 0.05f;
 
-        btVector3 from(-50,1.2,0);
-        btVector3 ray_direction(1, 0, 0);
-
-        for (unsigned int ray_i = 0; ray_i < max_ray_hits; ray_i++)
+        for (size_t ray_i = 0; ray_i < ray_count; ray_i++)
         {
-            btVector3 to = from * 1.02f + ray_direction * ray_length;
+            float current_acoustic_impedance = OrganProperties::void_acoustic_impedance;
 
-            btCollisionWorld::ClosestRayResultCallback closestResults(from,to);
+            btVector3 from = initial_pos + btVector3(0,0,ray_start_step * ray_i);
+            btVector3 ray_direction(1, 0, 0);
 
-            m_dynamicsWorld->rayTest(from,to,closestResults);
-
-            if (closestResults.hasHit())
+            for (unsigned int hit_i = 0; hit_i < max_ray_hits; hit_i++)
             {
-                OrganProperties * organ_properties = static_cast<OrganProperties*>(closestResults.m_collisionObject->getUserPointer());
-                float acoustic_impedance = organ_properties ? organ_properties->acoustic_impedance : current_acoustic_impedance;
+                btVector3 to = from * 1.02f + ray_direction * ray_length;
 
-                if (acoustic_impedance == current_acoustic_impedance)
+                btCollisionWorld::ClosestRayResultCallback closestResults(from,to);
+
+                m_dynamicsWorld->rayTest(from,to,closestResults);
+
+                if (closestResults.hasHit())
                 {
-                    // We collided two times with the same object, we are leaving it
-                    acoustic_impedance = OrganProperties::void_acoustic_impedance;
+                    OrganProperties * organ_properties = static_cast<OrganProperties*>(closestResults.m_collisionObject->getUserPointer());
+                    float acoustic_impedance = organ_properties ? organ_properties->acoustic_impedance : current_acoustic_impedance;
 
-                    m_dynamicsWorld->getDebugDrawer()->drawSphere(closestResults.m_hitPointWorld,0.1,red);
+                    if (acoustic_impedance == current_acoustic_impedance)
+                    {
+                        // We collided two times with the same object, we are leaving it
+                        acoustic_impedance = OrganProperties::void_acoustic_impedance;
+
+                        m_dynamicsWorld->getDebugDrawer()->drawSphere(closestResults.m_hitPointWorld,0.1,red);
+                    }
+                    else
+                    {
+                        m_dynamicsWorld->getDebugDrawer()->drawSphere(closestResults.m_hitPointWorld,0.1,blue);
+                    }
+
+                    m_dynamicsWorld->getDebugDrawer()->drawLine(from,closestResults.m_hitPointWorld,btVector4(1,0,1,1));
+
+                    const btVector3 refraction_direction = snells_law(ray_direction, closestResults.m_hitNormalWorld, current_acoustic_impedance, acoustic_impedance);
+                    ray_direction = refraction_direction;
+
+                    current_acoustic_impedance = acoustic_impedance;
+                    from = closestResults.m_hitPointWorld;
                 }
                 else
                 {
-                    m_dynamicsWorld->getDebugDrawer()->drawSphere(closestResults.m_hitPointWorld,0.1,blue);
+                    break;
                 }
-
-                m_dynamicsWorld->getDebugDrawer()->drawLine(from,closestResults.m_hitPointWorld,btVector4(1,0,1,1));
-
-                const btVector3 refraction_direction = snells_law(ray_direction, closestResults.m_hitNormalWorld, current_acoustic_impedance, acoustic_impedance);
-                ray_direction = refraction_direction;
-
-                current_acoustic_impedance = acoustic_impedance;
-                from = closestResults.m_hitPointWorld;
-            }
-            else
-            {
-                break;
             }
         }
     }
