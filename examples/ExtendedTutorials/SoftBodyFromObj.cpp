@@ -24,10 +24,8 @@
 #include <iostream>
 #include <array>
 
-#include <omp.h>
-
 #define USE_RIGID_BODY 0
-#define RENDER_RAYS 0
+#define RENDER_RAYS 1
 
 struct OrganProperties
 {
@@ -106,8 +104,6 @@ private:
 };
 
 void SoftBodyFromObjExample::initPhysics() {
-    omp_set_num_threads(4);
-
     m_guiHelper->setUpAxis(1);
     createEmptyDynamicsWorld();
     m_guiHelper->createPhysicsDebugDrawer(m_dynamicsWorld);
@@ -128,18 +124,22 @@ void SoftBodyFromObjExample::initPhysics() {
     }
 
     //load our obj mesh
-    const char* fileName = "liver_centered.obj";//sphere8.obj";//sponza_closed.obj";//sphere8.obj";
-    char relativeFileName[1024];
-    if (b3ResourcePath::findResourcePath(fileName, relativeFileName, 1024)) {
-        char pathPrefix[1024];
-        b3FileUtils::extractPath(relativeFileName, pathPrefix, 1024);
-    }
+    std::string working_dir = "data/ultrasound/";
+    std::array<std::string, 1> filenames
+    {
+        "liver.obj"
+    };
 
+
+    for (const auto & filename : filenames)
+    {
+        const auto full_path = working_dir + filename;
 #if USE_RIGID_BODY
-    add_rigidbody_from_obj(relativeFileName);
+        add_rigidbody_from_obj(relativeFileName);
 #else
-    add_softbody_from_obj(relativeFileName);
+        add_softbody_from_obj(full_path.c_str());
 #endif
+    }
 
     m_guiHelper->autogenerateGraphicsObjects(m_dynamicsWorld);
 }
@@ -148,7 +148,7 @@ void SoftBodyFromObjExample::renderScene()
 {
     CommonRigidBodyBase::renderScene();
 
-#if USE_RIGID_BODY != 0
+#if USE_RIGID_BODY == 0
     btSoftRigidDynamicsWorld* softWorld = getSoftDynamicsWorld();
 
     for ( int i=0;i<softWorld->getSoftBodyArray().size();i++)
@@ -207,7 +207,6 @@ void SoftBodyFromObjExample::castRays()
             }
         }
 
-        //#pragma omp parallel
         for (size_t ray_i = 0; ray_i < ray_count; ray_i++)
         {
             float current_acoustic_impedance = OrganProperties::void_acoustic_impedance;
@@ -300,21 +299,33 @@ void SoftBodyFromObjExample::add_softbody_from_obj(const char * fileName)
     std::vector<tinyobj::shape_t> shapes;
     std::string err = tinyobj::LoadObj(shapes, fileName, "");
 
+    if (!err.empty())
+    {
+        std::cout << err << std::endl;
+        return;
+    }
+    else
+    {
+        std::cout << "File " << fileName << "loaded. shapes.size(): " << shapes.size() << std::endl;
+    }
+
     btAlignedObjectArray<btScalar> vertices;
     btAlignedObjectArray<int> indices;
 
     //loop through all the shapes and add vertices and indices
     int offset = 0;
-    for(int i=0;i<shapes.size();++i) {
+    for(unsigned int i=0;i<shapes.size();++i) {
         const tinyobj::shape_t& shape = shapes[i];
 
         //add vertices
-        for(int j=0;j<shape.mesh.positions.size();++j) {
+        vertices.reserve(shape.mesh.positions.size());
+        for(unsigned int j=0;j<shape.mesh.positions.size();++j) {
             vertices.push_back(shape.mesh.positions[j]);
         }
 
         //add indices
-        for(int j=0;j<shape.mesh.indices.size();++j) {
+        indices.reserve(shape.mesh.indices.size());
+        for(unsigned int j=0;j<shape.mesh.indices.size();++j) {
             indices.push_back(offset + shape.mesh.indices[j]);
         }
         offset += shape.mesh.positions.size();
@@ -340,7 +351,7 @@ void SoftBodyFromObjExample::add_softbody_from_obj(const char * fileName)
 
     btMatrix3x3	m;
     //btVector3 x(-25,10,-7);
-    btVector3 x(0,10,0);
+    btVector3 x(0,0,0);
     btVector3 a(0,0,0);
     m.setEulerZYX(a.x(),a.y(),a.z());
     psb->transform(btTransform(m,x));
@@ -371,8 +382,6 @@ void SoftBodyFromObjExample::add_rigidbody_from_obj(const char * fileName)
 //    {
 //        shape->initializePolyhedralFeatures();
 //    }
-
-
 
     //shape->setMargin(0.001);
     m_collisionShapes.push_back(shape);
