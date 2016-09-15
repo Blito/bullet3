@@ -135,7 +135,7 @@ void SoftBodyFromObjExample::initPhysics() {
     {
         const auto full_path = working_dir + filename;
 #if USE_RIGID_BODY
-        add_rigidbody_from_obj(relativeFileName);
+        add_rigidbody_from_obj(full_path.c_str());
 #else
         add_softbody_from_obj(full_path.c_str());
 #endif
