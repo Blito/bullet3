@@ -24,7 +24,7 @@
 #include <iostream>
 #include <array>
 
-#define USE_RIGID_BODY 0
+#define USE_RIGID_BODY 1
 #define RENDER_RAYS 1
 
 struct OrganProperties
@@ -46,7 +46,7 @@ struct SoftBodyFromObjExample : public CommonRigidBodyBase {
     virtual void stepSimulation(float deltaTime);
     void createEmptyDynamicsWorld()
     {
-#if USE_RIGID_BODY
+#if 0
         m_collisionConfiguration = new btDefaultCollisionConfiguration();
 
         m_dispatcher = new	btCollisionDispatcher(m_collisionConfiguration);
@@ -64,7 +64,11 @@ struct SoftBodyFromObjExample : public CommonRigidBodyBase {
         m_collisionConfiguration = new btSoftBodyRigidBodyCollisionConfiguration();
         m_dispatcher = new	btCollisionDispatcher(m_collisionConfiguration);
 
-        m_broadphase = new btDbvtBroadphase();
+
+        btVector3 aabb_min(-2,-2,-2);
+        btVector3 aabb_max(2,2,2);
+        m_broadphase = new btAxisSweep3(aabb_min, aabb_max);
+        //m_broadphase = new btDbvtBroadphase();
 
         m_solver = new btSequentialImpulseConstraintSolver;
 
@@ -97,8 +101,8 @@ struct SoftBodyFromObjExample : public CommonRigidBodyBase {
     btSoftBodyWorldInfo softBodyWorldInfo;
 
 private:
-    void add_softbody_from_obj(const char * fileName);
-    void add_rigidbody_from_obj(const char * fileName);
+    void add_softbody_from_obj(const char * fileName, std::array<float, 3> deltas, float scaling);
+    void add_rigidbody_from_obj(const char * fileName, std::array<float, 3> deltas, float scaling);
 
     clock_t frame_start;
 };
@@ -124,21 +128,42 @@ void SoftBodyFromObjExample::initPhysics() {
     }
 
     //load our obj mesh
-    std::string working_dir = "data/ultrasound/";
-    std::array<std::string, 1> filenames
+    struct mesh
     {
-        "liver.obj"
+        std::string filename;
+        bool is_rigid;
+        std::array<float,3> deltas;
     };
 
+    std::string working_dir = "data/ultrasound/";
 
-    for (const auto & filename : filenames)
+    std::array<mesh,1> meshes
+    {{/*
+        {"centered_aorta.obj", true, {152.533512115f, 174.472991943f, 105.106495678f}},
+        {"centered_bones.obj", true, {188.265544891f, 202.440551758f, 105.599998474f}},
+        {"centered_liver.obj", false, {141.238292694f, 176.429901123f, 130.10585022f}},
+        {"centered_cava.obj", true,  {206.332504272f, 192.29649353f, 104.897496045f}},*/
+        {"centered_right_kidney.obj", true, {118.23374939f, 218.907501221f, 53.6022927761f}},
+        /*{"centered_left_kidney.obj", false,  {251.052993774f, 227.63949585f, 64.8468027115f}},
+        {"centered_right_suprarrenal.obj", false, {152.25050354f, 213.971496582f, 115.338005066f}},
+        {"centered_left_suprarrenal.obj", false,  {217.128997803f, 209.525497437f, 102.477149963f}},
+        {"centered_gallbladder.obj", true, {128.70715332f, 146.592498779f, 112.361503601f}},
+        {"centered_skin.obj", true,  {188.597551346f, 199.367202759f, 105.622316509f}},
+        {"centered_porta.obj", true, {182.364089966f, 177.214996338f, 93.0034988523f}}*/
+    }};
+
+    for (const auto & mesh : meshes)
     {
-        const auto full_path = working_dir + filename;
-#if USE_RIGID_BODY
-        add_rigidbody_from_obj(full_path.c_str());
-#else
-        add_softbody_from_obj(full_path.c_str());
-#endif
+        const auto full_path = working_dir + mesh.filename;
+
+        if (mesh.is_rigid)
+        {
+            add_rigidbody_from_obj(full_path.c_str(), mesh.deltas, 1.0f);
+        }
+        else
+        {
+            add_softbody_from_obj(full_path.c_str(), mesh.deltas, 0.1f);
+        }
     }
 
     m_guiHelper->autogenerateGraphicsObjects(m_dynamicsWorld);
@@ -148,7 +173,7 @@ void SoftBodyFromObjExample::renderScene()
 {
     CommonRigidBodyBase::renderScene();
 
-#if USE_RIGID_BODY == 0
+//#if USE_RIGID_BODY == 0
     btSoftRigidDynamicsWorld* softWorld = getSoftDynamicsWorld();
 
     for ( int i=0;i<softWorld->getSoftBodyArray().size();i++)
@@ -160,30 +185,11 @@ void SoftBodyFromObjExample::renderScene()
             btSoftBodyHelpers::Draw(psb,softWorld->getDebugDrawer(),softWorld->getDrawFlags());
         }
     }
-#endif
+//#endif
 }
 
 void SoftBodyFromObjExample::castRays()
 {
-    static float up = 0.f;
-    static float dir = 1.f;
-    //add some simple animation
-    //if (!m_idle)
-    {
-        up+=0.01*dir;
-
-        if (btFabs(up)>2)
-        {
-            dir*=-1.f;
-        }
-
-        btTransform tr = m_dynamicsWorld->getCollisionObjectArray()[1]->getWorldTransform();
-        static float angle = 0.f;
-        angle+=0.01f;
-        tr.setRotation(btQuaternion(btVector3(0,1,0),angle));
-        m_dynamicsWorld->getCollisionObjectArray()[1]->setWorldTransform(tr);
-    }
-
     ///step the simulation
     if (m_dynamicsWorld)
     {
@@ -195,7 +201,7 @@ void SoftBodyFromObjExample::castRays()
         constexpr unsigned int max_ray_hits = 5;
         const float ray_length = 100;
         const btVector3 initial_pos(-50,1.2,-3);
-        const float ray_start_step = 0.01f;
+        const float ray_start_step = 0.02f;
 
         const btVector3 empty_vector(0,0,0);
         std::array<std::array<btVector3, max_ray_hits>, ray_count> collisions;
@@ -224,6 +230,8 @@ void SoftBodyFromObjExample::castRays()
 
                 if (closestResults.hasHit())
                 {
+                    m_dynamicsWorld->getDebugDrawer()->drawLine(from,closestResults.m_hitPointWorld,btVector4(1,0,1,1));
+
                     OrganProperties * organ_properties = static_cast<OrganProperties*>(closestResults.m_collisionObject->getUserPointer());
                     float acoustic_impedance = organ_properties ? organ_properties->acoustic_impedance : current_acoustic_impedance;
 
@@ -294,7 +302,7 @@ btVector3 SoftBodyFromObjExample::snells_law(btVector3 ray_direction, btVector3 
     return btVector3( r * l + (r*c - std::sqrt(1 - r*r * (1 - c*c))) * n );
 }
 
-void SoftBodyFromObjExample::add_softbody_from_obj(const char * fileName)
+void SoftBodyFromObjExample::add_softbody_from_obj(const char * fileName, std::array<float, 3> deltas, float scaling)
 {
     std::vector<tinyobj::shape_t> shapes;
     std::string err = tinyobj::LoadObj(shapes, fileName, "");
@@ -334,15 +342,13 @@ void SoftBodyFromObjExample::add_softbody_from_obj(const char * fileName)
 
     btSoftBody*	psb = btSoftBodyHelpers::CreateFromTriMesh(softBodyWorldInfo, &vertices[0], &(indices[0]), indices.size()/3);
 
-    btVector3 scaling(0.1, 0.1, 0.1);
-
     OrganProperties * properties = new OrganProperties(0.6f);
     psb->setUserPointer(properties);
 
     btSoftBody::Material* pm=psb->appendMaterial();
     pm->m_kLST =	0.75;
     pm->m_flags -= btSoftBody::fMaterial::DebugDraw;
-    psb->scale(scaling);
+    psb->scale(btVector3(scaling, scaling, scaling));
     psb->generateBendingConstraints(4,pm);
     psb->m_cfg.piterations = 2;
     psb->m_cfg.kDF = 0.75;
@@ -351,6 +357,7 @@ void SoftBodyFromObjExample::add_softbody_from_obj(const char * fileName)
 
     btMatrix3x3	m;
     //btVector3 x(-25,10,-7);
+    //btVector3 x(deltas[0], deltas[1], deltas[2]);
     btVector3 x(0,0,0);
     btVector3 a(0,0,0);
     m.setEulerZYX(a.x(),a.y(),a.z());
@@ -360,49 +367,42 @@ void SoftBodyFromObjExample::add_softbody_from_obj(const char * fileName)
     getSoftDynamicsWorld()->addSoftBody(psb);
 }
 
-void SoftBodyFromObjExample::add_rigidbody_from_obj(const char * fileName)
+void SoftBodyFromObjExample::add_rigidbody_from_obj(const char * fileName, std::array<float, 3> deltas, float _scaling)
 {
     GLInstanceGraphicsShape* glmesh = LoadMeshFromObj(fileName, "");
     printf("[INFO] Obj loaded: Extracted %d verticed from obj file [%s]\n", glmesh->m_numvertices, fileName);
 
     const GLInstanceVertex& v = glmesh->m_vertices->at(0);
-    btConvexHullShape* shape = new btConvexHullShape((const btScalar*)(&(v.xyzw[0])), glmesh->m_numvertices, sizeof(GLInstanceVertex));
+    btTriangleIndexVertexArray* tiva = new btTriangleIndexVertexArray(glmesh->m_numIndices, &glmesh->m_indices->at(0), 0,
+                                                                      glmesh->m_numvertices, (btScalar*)(&(v.xyzw[0])), 0);
+    btBvhTriangleMeshShape* shape = new btBvhTriangleMeshShape(tiva, true);
+
+    //btConvexHullShape* shape = new btConvexHullShape((const btScalar*)(&(v.xyzw[0])), glmesh->m_numvertices, sizeof(GLInstanceVertex));
+
+    m_collisionShapes.push_back(shape);
 
     float scaling[4] = {0.1,0.1,0.1,1};
 
     btVector3 localScaling(scaling[0],scaling[1],scaling[2]);
     shape->setLocalScaling(localScaling);
 
-//    if (m_options & OptimizeConvexObj)
-//    {
-//        shape->optimizeConvexHull();
-//    }
+    btTransform startTransform;
+    startTransform.setIdentity();
 
-//    if (m_options & ComputePolyhedralFeatures)
-//    {
-//        shape->initializePolyhedralFeatures();
-//    }
-
-    //shape->setMargin(0.001);
-    m_collisionShapes.push_back(shape);
-
-    btScalar mass(1.f);
+    btScalar	mass(0.f);
     bool isDynamic = (mass != 0.f);
     btVector3 localInertia(0,0,0);
     if (isDynamic)
-    {
         shape->calculateLocalInertia(mass,localInertia);
-    }
 
     float color[4] = {1,1,1,1};
     float orn[4] = {0,0,0,1};
-    float pos[4] = {-25,-17,-15,0};
-
-    btTransform startTransform;
-    startTransform.setIdentity();
-    btVector3 position(0,20,0);
+    float pos[4] = {0,3,0,0};
+    btVector3 position(pos[0],pos[1],pos[2]);
     startTransform.setOrigin(position);
-    btRigidBody* body = createRigidBody(mass,startTransform,shape);
+        btRigidBody* body = createRigidBody(mass,startTransform,shape);
+
+
 
     bool useConvexHullForRendering = false;//((m_options & ObjUseConvexHullForRendering)!=0);
 
