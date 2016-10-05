@@ -65,8 +65,8 @@ struct SoftBodyFromObjExample : public CommonRigidBodyBase {
         m_dispatcher = new	btCollisionDispatcher(m_collisionConfiguration);
 
 
-        btVector3 aabb_min(-2,-2,-2);
-        btVector3 aabb_max(2,2,2);
+        btVector3 aabb_min(-10,-10,-10);
+        btVector3 aabb_max(10,10,10);
         m_broadphase = new btAxisSweep3(aabb_min, aabb_max);
         //m_broadphase = new btDbvtBroadphase();
 
@@ -137,19 +137,19 @@ void SoftBodyFromObjExample::initPhysics() {
 
     std::string working_dir = "data/ultrasound/";
 
-    std::array<mesh,1> meshes
-    {{/*
-        {"centered_aorta.obj", true, {152.533512115f, 174.472991943f, 105.106495678f}},
-        {"centered_bones.obj", true, {188.265544891f, 202.440551758f, 105.599998474f}},
-        {"centered_liver.obj", false, {141.238292694f, 176.429901123f, 130.10585022f}},
-        {"centered_cava.obj", true,  {206.332504272f, 192.29649353f, 104.897496045f}},*/
-        {"centered_right_kidney.obj", true, {118.23374939f, 218.907501221f, 53.6022927761f}},
-        /*{"centered_left_kidney.obj", false,  {251.052993774f, 227.63949585f, 64.8468027115f}},
-        {"centered_right_suprarrenal.obj", false, {152.25050354f, 213.971496582f, 115.338005066f}},
-        {"centered_left_suprarrenal.obj", false,  {217.128997803f, 209.525497437f, 102.477149963f}},
-        {"centered_gallbladder.obj", true, {128.70715332f, 146.592498779f, 112.361503601f}},
-        {"centered_skin.obj", true,  {188.597551346f, 199.367202759f, 105.622316509f}},
-        {"centered_porta.obj", true, {182.364089966f, 177.214996338f, 93.0034988523f}}*/
+    std::array<mesh,11> meshes
+    {{
+        {"aorta.obj", true, {152.533512115f, 174.472991943f, 105.106495678f}},
+        {"bones.obj", true, {188.265544891f, 202.440551758f, 105.599998474f}},
+        {"liver.obj", true, {141.238292694f, 176.429901123f, 130.10585022f}},
+        {"cava.obj", true,  {206.332504272f, 192.29649353f, 104.897496045f}},
+        {"right_kidney.obj", true, {118.23374939f, 218.907501221f, 53.6022927761f}},
+        {"left_kidney.obj", true,  {251.052993774f, 227.63949585f, 64.8468027115f}},
+        {"right_suprarrenal.obj", true, {152.25050354f, 213.971496582f, 115.338005066f}},
+        {"left_suprarrenal.obj", true,  {217.128997803f, 209.525497437f, 102.477149963f}},
+        {"gallbladder.obj", true, {128.70715332f, 146.592498779f, 112.361503601f}},
+        {"skin.obj", true,  {188.597551346f, 199.367202759f, 105.622316509f}},
+        {"porta.obj", true, {182.364089966f, 177.214996338f, 93.0034988523f}}
     }};
 
     for (const auto & mesh : meshes)
@@ -158,7 +158,7 @@ void SoftBodyFromObjExample::initPhysics() {
 
         if (mesh.is_rigid)
         {
-            add_rigidbody_from_obj(full_path.c_str(), mesh.deltas, 1.0f);
+            add_rigidbody_from_obj(full_path.c_str(), mesh.deltas, 0.1f);
         }
         else
         {
@@ -230,7 +230,9 @@ void SoftBodyFromObjExample::castRays()
 
                 if (closestResults.hasHit())
                 {
+#if RENDER_RAYS
                     m_dynamicsWorld->getDebugDrawer()->drawLine(from,closestResults.m_hitPointWorld,btVector4(1,0,1,1));
+#endif
 
                     OrganProperties * organ_properties = static_cast<OrganProperties*>(closestResults.m_collisionObject->getUserPointer());
                     float acoustic_impedance = organ_properties ? organ_properties->acoustic_impedance : current_acoustic_impedance;
@@ -367,23 +369,22 @@ void SoftBodyFromObjExample::add_softbody_from_obj(const char * fileName, std::a
     getSoftDynamicsWorld()->addSoftBody(psb);
 }
 
-void SoftBodyFromObjExample::add_rigidbody_from_obj(const char * fileName, std::array<float, 3> deltas, float _scaling)
+void SoftBodyFromObjExample::add_rigidbody_from_obj(const char * fileName, std::array<float, 3> deltas, float scaling)
 {
     GLInstanceGraphicsShape* glmesh = LoadMeshFromObj(fileName, "");
     printf("[INFO] Obj loaded: Extracted %d verticed from obj file [%s]\n", glmesh->m_numvertices, fileName);
 
     const GLInstanceVertex& v = glmesh->m_vertices->at(0);
-    btTriangleIndexVertexArray* tiva = new btTriangleIndexVertexArray(glmesh->m_numIndices, &glmesh->m_indices->at(0), 0,
-                                                                      glmesh->m_numvertices, (btScalar*)(&(v.xyzw[0])), 0);
-    btBvhTriangleMeshShape* shape = new btBvhTriangleMeshShape(tiva, true);
+    btTriangleIndexVertexArray* tiva = new btTriangleIndexVertexArray(glmesh->m_numIndices / 3, &glmesh->m_indices->at(0), 3* sizeof(int),
+                                                                      glmesh->m_numvertices, (btScalar*)(&(v.xyzw[0])), sizeof(GLInstanceVertex));
 
-    //btConvexHullShape* shape = new btConvexHullShape((const btScalar*)(&(v.xyzw[0])), glmesh->m_numvertices, sizeof(GLInstanceVertex));
+    btBvhTriangleMeshShape* shape = new btBvhTriangleMeshShape(tiva, true);
 
     m_collisionShapes.push_back(shape);
 
-    float scaling[4] = {0.1,0.1,0.1,1};
+    float _scaling[4] = {scaling,scaling,scaling,1};
 
-    btVector3 localScaling(scaling[0],scaling[1],scaling[2]);
+    btVector3 localScaling(_scaling[0],_scaling[1],_scaling[2]);
     shape->setLocalScaling(localScaling);
 
     btTransform startTransform;
@@ -397,27 +398,27 @@ void SoftBodyFromObjExample::add_rigidbody_from_obj(const char * fileName, std::
 
     float color[4] = {1,1,1,1};
     float orn[4] = {0,0,0,1};
-    float pos[4] = {0,3,0,0};
-    btVector3 position(pos[0],pos[1],pos[2]);
+
+    std::array<float, 3> origin { -18, -22, -5 };
+    float pos[4] = {deltas[0]*_scaling[0]*_scaling[0],deltas[1]*_scaling[1]*_scaling[1],deltas[2]*_scaling[2]*_scaling[2],0};
+    btVector3 position(pos[0] + origin[0], pos[1] + origin[1], pos[2] + origin[2]);
     startTransform.setOrigin(position);
         btRigidBody* body = createRigidBody(mass,startTransform,shape);
 
+//    bool useConvexHullForRendering = false;//((m_options & ObjUseConvexHullForRendering)!=0);
 
 
-    bool useConvexHullForRendering = false;//((m_options & ObjUseConvexHullForRendering)!=0);
-
-
-    if (!useConvexHullForRendering)
-    {
-        int shapeId = m_guiHelper->registerGraphicsShape(&glmesh->m_vertices->at(0).xyzw[0],
-                                                                        glmesh->m_numvertices,
-                                                                        &glmesh->m_indices->at(0),
-                                                                        glmesh->m_numIndices,
-                                                                        B3_GL_TRIANGLES, -1);
-        shape->setUserIndex(shapeId);
-        int renderInstance = m_guiHelper->registerGraphicsInstance(shapeId,pos,orn,color,scaling);
-        body->setUserIndex(renderInstance);
-    }
+//    if (!useConvexHullForRendering)
+//    {
+//        int shapeId = m_guiHelper->registerGraphicsShape(&glmesh->m_vertices->at(0).xyzw[0],
+//                                                                        glmesh->m_numvertices,
+//                                                                        &glmesh->m_indices->at(0),
+//                                                                        glmesh->m_numIndices,
+//                                                                        B3_GL_TRIANGLES, -1);
+//        shape->setUserIndex(shapeId);
+//        int renderInstance = m_guiHelper->registerGraphicsInstance(shapeId,pos,orn,color,scaling);
+//        body->setUserIndex(renderInstance);
+//    }
 }
 
 CommonExampleInterface*    ET_SoftBodyFromObjCreateFunc(CommonExampleOptions& options)
