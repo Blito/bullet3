@@ -23,6 +23,7 @@
 #include <ctime>
 #include <iostream>
 #include <array>
+#include <unordered_map>
 
 #define USE_RIGID_BODY 1
 #define RENDER_RAYS 1
@@ -101,8 +102,37 @@ struct SoftBodyFromObjExample : public CommonRigidBodyBase {
     btSoftBodyWorldInfo softBodyWorldInfo;
 
 private:
-    void add_softbody_from_obj(const char * fileName, std::array<float, 3> deltas, float scaling);
-    void add_rigidbody_from_obj(const char * fileName, std::array<float, 3> deltas, float scaling);
+    btSoftBody * add_softbody_from_obj(const char * fileName, std::array<float, 3> deltas, float scaling);
+    btRigidBody * add_rigidbody_from_obj(const char * fileName, std::array<float, 3> deltas, float scaling);
+
+    enum class material_id
+    {
+        AIR, FAT, BONE, BLOOD, VESSEL, LIVER, KIDNEY, SUPRARRENAL, GALLBLADDER, SKIN
+    };
+
+    struct material
+    {
+        float impedance, attenuation, mu0, mu1, sigma;
+    };
+
+    struct EnumClassHash
+    {
+        template <typename T>
+        std::size_t operator()(T t) const
+        {
+            return static_cast<std::size_t>(t);
+        }
+    };
+
+    struct mesh
+    {
+        std::string filename;
+        bool is_rigid;
+        std::array<float,3> deltas;
+        material_id material;
+    };
+
+    std::string working_dir = "data/ultrasound/";
 
     clock_t frame_start;
 };
@@ -115,55 +145,45 @@ void SoftBodyFromObjExample::initPhysics() {
     if (m_dynamicsWorld->getDebugDrawer())
         m_dynamicsWorld->getDebugDrawer()->setDebugMode(btIDebugDraw::DBG_DrawWireframe+btIDebugDraw::DBG_DrawContactPoints);
 
-    btBoxShape* groundShape = createBoxShape(btVector3(btScalar(50.),btScalar(50.),btScalar(50.)));
-    m_collisionShapes.push_back(groundShape);
-
-    btTransform groundTransform;
-    groundTransform.setIdentity();
-    groundTransform.setOrigin(btVector3(0,-50,0));
-
+    std::unordered_map<material_id, material, EnumClassHash> materials
     {
-        btScalar mass(0.);
-        createRigidBody(mass,groundTransform,groundShape, btVector4(0,0,1,1));
-    }
-
-    //load our obj mesh
-    struct mesh
-    {
-        std::string filename;
-        bool is_rigid;
-        std::array<float,3> deltas;
+        { material_id::AIR, {0.0004f, 1.64f, 0.78f, 0.56f, 0.1f} },
+        { material_id::FAT, {1.38f, 0.63f, 0.5f, 0.5f, 0.0f} },
+        { material_id::BONE, {7.8f, 5.0f, 0.78f, 0.56f, 0.1f} },
+        { material_id::BLOOD, {1.61f, 0.18f, 0.001f, 0.0f, 0.01f} },
+        { material_id::VESSEL, {1.99f, 1.09f, 0.2f, 0.1f, 0.2f} },
+        { material_id::LIVER, {1.65f, 0.7f, 0.19f, 1.0f, 0.24f} },
+        { material_id::KIDNEY, {1.62f, 1.0f, 0.4f, 0.6f, 0.3f} },
+        { material_id::SUPRARRENAL, {1.62f, 1.0f, 0.4f, 0.6f, 0.3f} }, // todo
+        { material_id::GALLBLADDER, {1.62f, 1.0f, 0.4f, 0.6f, 0.3f} }, // todo
+        { material_id::SKIN, {1.99f, 0.6f, 0.5f, 0.2f, 0.5f} },
     };
-
-    std::string working_dir = "data/ultrasound/";
 
     std::array<mesh,11> meshes
     {{
-        {"aorta.obj", true, {152.533512115f, 174.472991943f, 105.106495678f}},
-        {"bones.obj", true, {188.265544891f, 202.440551758f, 105.599998474f}},
-        {"liver.obj", true, {141.238292694f, 176.429901123f, 130.10585022f}},
-        {"cava.obj", true,  {206.332504272f, 192.29649353f, 104.897496045f}},
-        {"right_kidney.obj", true, {118.23374939f, 218.907501221f, 53.6022927761f}},
-        {"left_kidney.obj", true,  {251.052993774f, 227.63949585f, 64.8468027115f}},
-        {"right_suprarrenal.obj", true, {152.25050354f, 213.971496582f, 115.338005066f}},
-        {"left_suprarrenal.obj", true,  {217.128997803f, 209.525497437f, 102.477149963f}},
-        {"gallbladder.obj", true, {128.70715332f, 146.592498779f, 112.361503601f}},
-        {"skin.obj", true,  {188.597551346f, 199.367202759f, 105.622316509f}},
-        {"porta.obj", true, {182.364089966f, 177.214996338f, 93.0034988523f}}
+        {"aorta.obj", true, {152.533512115f, 174.472991943f, 105.106495678f}, material_id::BLOOD},
+        {"bones.obj", true, {188.265544891f, 202.440551758f, 105.599998474f}, material_id::BONE},
+        {"liver.obj", true, {141.238292694f, 176.429901123f, 130.10585022f}, material_id::LIVER},
+        {"cava.obj", true,  {206.332504272f, 192.29649353f, 104.897496045f}, material_id::BLOOD},
+        {"right_kidney.obj", true, {118.23374939f, 218.907501221f, 53.6022927761f}, material_id::KIDNEY},
+        {"left_kidney.obj", true,  {251.052993774f, 227.63949585f, 64.8468027115f}, material_id::KIDNEY},
+        {"right_suprarrenal.obj", true, {152.25050354f, 213.971496582f, 115.338005066f}, material_id::SUPRARRENAL},
+        {"left_suprarrenal.obj", true,  {217.128997803f, 209.525497437f, 102.477149963f}, material_id::SUPRARRENAL},
+        {"gallbladder.obj", true, {128.70715332f, 146.592498779f, 112.361503601f}, material_id::GALLBLADDER},
+        {"skin.obj", true,  {188.597551346f, 199.367202759f, 105.622316509f}, material_id::FAT},
+        {"porta.obj", true, {182.364089966f, 177.214996338f, 93.0034988523f}, material_id::BLOOD}
     }};
 
     for (const auto & mesh : meshes)
     {
         const auto full_path = working_dir + mesh.filename;
 
-        if (mesh.is_rigid)
-        {
-            add_rigidbody_from_obj(full_path.c_str(), mesh.deltas, 0.1f);
-        }
-        else
-        {
-            add_softbody_from_obj(full_path.c_str(), mesh.deltas, 0.1f);
-        }
+        auto object = mesh.is_rigid ?
+            static_cast<btCollisionObject*>(add_rigidbody_from_obj(full_path.c_str(), mesh.deltas, 0.1f)):
+            static_cast<btCollisionObject*>(add_softbody_from_obj(full_path.c_str(), mesh.deltas, 0.1f));
+
+        auto properties = new OrganProperties(materials[mesh.material].impedance);
+        object->setUserPointer(properties);
     }
 
     m_guiHelper->autogenerateGraphicsObjects(m_dynamicsWorld);
@@ -190,6 +210,7 @@ void SoftBodyFromObjExample::renderScene()
 
 void SoftBodyFromObjExample::castRays()
 {
+    unsigned int tests = 0;
     ///step the simulation
     if (m_dynamicsWorld)
     {
@@ -227,6 +248,7 @@ void SoftBodyFromObjExample::castRays()
                 btCollisionWorld::ClosestRayResultCallback closestResults(from,to);
 
                 m_dynamicsWorld->rayTest(from,to,closestResults);
+                tests++;
 
                 if (closestResults.hasHit())
                 {
@@ -275,7 +297,7 @@ void SoftBodyFromObjExample::castRays()
     }
 
     const float fps = 1.0f / (float( clock() - frame_start ) /  CLOCKS_PER_SEC);
-    std::cout << fps << std::endl;
+    std::cout << fps << " " << tests << std::endl;
     frame_start = clock();
 }
 
@@ -304,7 +326,7 @@ btVector3 SoftBodyFromObjExample::snells_law(btVector3 ray_direction, btVector3 
     return btVector3( r * l + (r*c - std::sqrt(1 - r*r * (1 - c*c))) * n );
 }
 
-void SoftBodyFromObjExample::add_softbody_from_obj(const char * fileName, std::array<float, 3> deltas, float scaling)
+btSoftBody * SoftBodyFromObjExample::add_softbody_from_obj(const char * fileName, std::array<float, 3> deltas, float scaling)
 {
     std::vector<tinyobj::shape_t> shapes;
     std::string err = tinyobj::LoadObj(shapes, fileName, "");
@@ -312,7 +334,7 @@ void SoftBodyFromObjExample::add_softbody_from_obj(const char * fileName, std::a
     if (!err.empty())
     {
         std::cout << err << std::endl;
-        return;
+        return nullptr;
     }
     else
     {
@@ -344,9 +366,6 @@ void SoftBodyFromObjExample::add_softbody_from_obj(const char * fileName, std::a
 
     btSoftBody*	psb = btSoftBodyHelpers::CreateFromTriMesh(softBodyWorldInfo, &vertices[0], &(indices[0]), indices.size()/3);
 
-    OrganProperties * properties = new OrganProperties(0.6f);
-    psb->setUserPointer(properties);
-
     btSoftBody::Material* pm=psb->appendMaterial();
     pm->m_kLST =	0.75;
     pm->m_flags -= btSoftBody::fMaterial::DebugDraw;
@@ -367,9 +386,11 @@ void SoftBodyFromObjExample::add_softbody_from_obj(const char * fileName, std::a
     psb->setTotalMass(1);
     psb->getCollisionShape()->setMargin(0.1f);
     getSoftDynamicsWorld()->addSoftBody(psb);
+
+    return psb;
 }
 
-void SoftBodyFromObjExample::add_rigidbody_from_obj(const char * fileName, std::array<float, 3> deltas, float scaling)
+btRigidBody * SoftBodyFromObjExample::add_rigidbody_from_obj(const char * fileName, std::array<float, 3> deltas, float scaling)
 {
     GLInstanceGraphicsShape* glmesh = LoadMeshFromObj(fileName, "");
     printf("[INFO] Obj loaded: Extracted %d verticed from obj file [%s]\n", glmesh->m_numvertices, fileName);
@@ -396,14 +417,12 @@ void SoftBodyFromObjExample::add_rigidbody_from_obj(const char * fileName, std::
     if (isDynamic)
         shape->calculateLocalInertia(mass,localInertia);
 
-    float color[4] = {1,1,1,1};
-    float orn[4] = {0,0,0,1};
-
     std::array<float, 3> origin { -18, -22, -5 };
     float pos[4] = {deltas[0]*_scaling[0]*_scaling[0],deltas[1]*_scaling[1]*_scaling[1],deltas[2]*_scaling[2]*_scaling[2],0};
     btVector3 position(pos[0] + origin[0], pos[1] + origin[1], pos[2] + origin[2]);
     startTransform.setOrigin(position);
-        btRigidBody* body = createRigidBody(mass,startTransform,shape);
+
+    return createRigidBody(mass,startTransform,shape);
 
 //    bool useConvexHullForRendering = false;//((m_options & ObjUseConvexHullForRendering)!=0);
 
