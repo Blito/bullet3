@@ -171,6 +171,9 @@ SET(BulletExampleBrowser_SRCS
 	../ExtendedTutorials/SimpleCloth.h
         ../ExtendedTutorials/SoftBodyFromObj.cpp
         ../ExtendedTutorials/SoftBodyFromObj.h
+        ../ExtendedTutorials/ray.cpp
+        ../ExtendedTutorials/ray.h
+        ../ExtendedTutorials/material.h
 	../ExtendedTutorials/SimpleJoint.cpp
 	../ExtendedTutorials/SimpleJoint.h
 	../ExtendedTutorials/NewtonsCradle.cpp

@@ -24,19 +24,15 @@
 #include <iostream>
 #include <array>
 #include <unordered_map>
+#include <vector>
+
+#include "material.h"
+#include "ray.h"
+
+#include <omp.h>
 
 #define USE_RIGID_BODY 1
 #define RENDER_RAYS 1
-
-struct OrganProperties
-{
-    OrganProperties(float acoustic_impedance)
-        : acoustic_impedance(acoustic_impedance)
-    {}
-
-    static constexpr float void_acoustic_impedance = 1.0f;
-    float acoustic_impedance;
-};
 
 struct SoftBodyFromObjExample : public CommonRigidBodyBase {
     SoftBodyFromObjExample(struct GUIHelperInterface* helper):CommonRigidBodyBase(helper), frame_start(clock()) {}
@@ -47,10 +43,10 @@ struct SoftBodyFromObjExample : public CommonRigidBodyBase {
     virtual void stepSimulation(float deltaTime);
     void createEmptyDynamicsWorld()
     {
-#if 0
+#if USE_RIGID_BODY
         m_collisionConfiguration = new btDefaultCollisionConfiguration();
 
-        m_dispatcher = new	btCollisionDispatcher(m_collisionConfiguration);
+        m_dispatcher = new btCollisionDispatcher(m_collisionConfiguration);
 
         m_broadphase = new btDbvtBroadphase();
 
@@ -97,33 +93,9 @@ struct SoftBodyFromObjExample : public CommonRigidBodyBase {
         m_guiHelper->resetCamera(dist,pitch,yaw,targetPos[0],targetPos[1],targetPos[2]);
     }
 
-    btVector3 snells_law(btVector3 ray_direction, btVector3 surface_normal, float refr_index_1, float refr_index_2);
-
     btSoftBodyWorldInfo softBodyWorldInfo;
 
 private:
-    btSoftBody * add_softbody_from_obj(const char * fileName, std::array<float, 3> deltas, float scaling);
-    btRigidBody * add_rigidbody_from_obj(const char * fileName, std::array<float, 3> deltas, float scaling);
-
-    enum class material_id
-    {
-        AIR, FAT, BONE, BLOOD, VESSEL, LIVER, KIDNEY, SUPRARRENAL, GALLBLADDER, SKIN
-    };
-
-    struct material
-    {
-        float impedance, attenuation, mu0, mu1, sigma;
-    };
-
-    struct EnumClassHash
-    {
-        template <typename T>
-        std::size_t operator()(T t) const
-        {
-            return static_cast<std::size_t>(t);
-        }
-    };
-
     struct mesh
     {
         std::string filename;
@@ -132,21 +104,37 @@ private:
         material_id material;
     };
 
-    std::string working_dir = "data/ultrasound/";
+    struct organ_properties
+    {
+        organ_properties(material_id mat_id)
+            : mat_id(mat_id)
+        {}
+
+        static constexpr float void_acoustic_impedance = 1.0f;
+        material_id mat_id;
+    };
+
+    btSoftBody * add_softbody_from_obj(const char * fileName, std::array<float, 3> deltas, float scaling);
+    btRigidBody * add_rigidbody_from_obj(const char * fileName, std::array<float, 3> deltas, float scaling);
+
+    unsigned int max_ray_length(material_id mat, float intensity) const;
+
+    float distance_in_mm(const btVector3 & v1, const btVector3 & v2) const;
+
+    btVector3 enlarge(const btVector3 & versor, float mm) const;
 
     clock_t frame_start;
-};
 
-void SoftBodyFromObjExample::initPhysics() {
-    m_guiHelper->setUpAxis(1);
-    createEmptyDynamicsWorld();
-    m_guiHelper->createPhysicsDebugDrawer(m_dynamicsWorld);
+    const std::string working_dir { "data/ultrasound/" };
+    const float frequency { 5.0f };
+    const float intensity_epsilon { 1e-8 };
+    const float initial_intensity { 1.0f };
 
-    if (m_dynamicsWorld->getDebugDrawer())
-        m_dynamicsWorld->getDebugDrawer()->setDebugMode(btIDebugDraw::DBG_DrawWireframe+btIDebugDraw::DBG_DrawContactPoints);
+    const std::array<float, 3> spacing {{ 1.0f, 1.0f, 1.0f }};
 
     std::unordered_map<material_id, material, EnumClassHash> materials
     {
+        { material_id::GEL, {1.99f, 1e-8, 0.0f, 0.0f, 0.0f} },
         { material_id::AIR, {0.0004f, 1.64f, 0.78f, 0.56f, 0.1f} },
         { material_id::FAT, {1.38f, 0.63f, 0.5f, 0.5f, 0.0f} },
         { material_id::BONE, {7.8f, 5.0f, 0.78f, 0.56f, 0.1f} },
@@ -158,6 +146,15 @@ void SoftBodyFromObjExample::initPhysics() {
         { material_id::GALLBLADDER, {1.62f, 1.0f, 0.4f, 0.6f, 0.3f} }, // todo
         { material_id::SKIN, {1.99f, 0.6f, 0.5f, 0.2f, 0.5f} },
     };
+};
+
+void SoftBodyFromObjExample::initPhysics() {
+    m_guiHelper->setUpAxis(1);
+    createEmptyDynamicsWorld();
+    m_guiHelper->createPhysicsDebugDrawer(m_dynamicsWorld);
+
+    if (m_dynamicsWorld->getDebugDrawer())
+        m_dynamicsWorld->getDebugDrawer()->setDebugMode(btIDebugDraw::DBG_DrawWireframe+btIDebugDraw::DBG_DrawContactPoints);
 
     std::array<mesh,11> meshes
     {{
@@ -170,7 +167,7 @@ void SoftBodyFromObjExample::initPhysics() {
         {"right_suprarrenal.obj", true, {152.25050354f, 213.971496582f, 115.338005066f}, material_id::SUPRARRENAL},
         {"left_suprarrenal.obj", true,  {217.128997803f, 209.525497437f, 102.477149963f}, material_id::SUPRARRENAL},
         {"gallbladder.obj", true, {128.70715332f, 146.592498779f, 112.361503601f}, material_id::GALLBLADDER},
-        {"skin.obj", true,  {188.597551346f, 199.367202759f, 105.622316509f}, material_id::FAT},
+        {"skin.obj", true,  {188.597551346f, 199.367202759f, 105.622316509f}, material_id::BONE},
         {"porta.obj", true, {182.364089966f, 177.214996338f, 93.0034988523f}, material_id::BLOOD}
     }};
 
@@ -182,7 +179,7 @@ void SoftBodyFromObjExample::initPhysics() {
             static_cast<btCollisionObject*>(add_rigidbody_from_obj(full_path.c_str(), mesh.deltas, 0.1f)):
             static_cast<btCollisionObject*>(add_softbody_from_obj(full_path.c_str(), mesh.deltas, 0.1f));
 
-        auto properties = new OrganProperties(materials[mesh.material].impedance);
+        auto properties = new organ_properties(mesh.material);
         object->setUserPointer(properties);
     }
 
@@ -210,90 +207,117 @@ void SoftBodyFromObjExample::renderScene()
 
 void SoftBodyFromObjExample::castRays()
 {
+    using namespace ray_physics;
+
     unsigned int tests = 0;
+    constexpr bool render_rays = false;
+    constexpr bool render_hits = false;
     ///step the simulation
     if (m_dynamicsWorld)
     {
+        constexpr size_t ray_count { 256 };
+        btVector3 initial_pos(-14,1.2,-3);
+        const float ray_start_step { 0.02f };
 
-        m_dynamicsWorld->updateAabbs();
-        m_dynamicsWorld->computeOverlappingPairs();
-
-        constexpr size_t ray_count = 500;
-        constexpr unsigned int max_ray_hits = 5;
-        const float ray_length = 100;
-        const btVector3 initial_pos(-50,1.2,-3);
-        const float ray_start_step = 0.02f;
-
-        const btVector3 empty_vector(0,0,0);
-        std::array<std::array<btVector3, max_ray_hits>, ray_count> collisions;
-        for (auto & ray : collisions)
+        std::array<std::vector<btVector3>, ray_count> collisions;
+        for (auto & collision_vector : collisions)
         {
-            for (auto & spot : ray)
-            {
-                spot = empty_vector;
-            }
+            collision_vector.reserve(std::pow(2, ray::max_depth));
         }
 
+        #pragma omp parallel for
         for (size_t ray_i = 0; ray_i < ray_count; ray_i++)
         {
-            float current_acoustic_impedance = OrganProperties::void_acoustic_impedance;
+            std::vector<ray> ray_stack;
+            ray_stack.reserve(ray::max_depth-1);
 
-            btVector3 from = initial_pos + btVector3(0,0,ray_start_step * ray_i);
-            btVector3 ray_direction(1, 0, 0);
-
-            for (unsigned int hit_i = 0; hit_i < max_ray_hits; hit_i++)
+            // Add first ray
             {
-                btVector3 to = from * 1.02f + ray_direction * ray_length;
+                ray first_ray
+                {
+                    initial_pos + btVector3(0,0,ray_start_step * ray_i), // from
+                    {1, 0, 0},                                           // initial direction
+                    0,                                                   // depth
+                    materials[material_id::GEL],
+                    initial_intensity,
+                    frequency
+                };
+                ray_stack.push_back(first_ray);
+            }
 
-                btCollisionWorld::ClosestRayResultCallback closestResults(from,to);
+            while (ray_stack.size() > 0)
+            {
+                // Pop a ray from the stack and check if it collides
 
-                m_dynamicsWorld->rayTest(from,to,closestResults);
+                auto ray_ = ray_stack.at(ray_stack.size()-1);
+
+                float r_length = ray_physics::max_ray_length(ray_);
+                auto to = ray_.from * 1.02f + enlarge(ray_.direction, r_length);
+
+                btCollisionWorld::ClosestRayResultCallback closestResults(ray_.from,to);
+
+                m_dynamicsWorld->rayTest(ray_.from,to,closestResults);
                 tests++;
+
+                ray_stack.pop_back();
 
                 if (closestResults.hasHit())
                 {
-#if RENDER_RAYS
-                    m_dynamicsWorld->getDebugDrawer()->drawLine(from,closestResults.m_hitPointWorld,btVector4(1,0,1,1));
-#endif
+                    organ_properties * organ = static_cast<organ_properties*>(closestResults.m_collisionObject->getUserPointer());
+                    const auto & organ_material = organ ? materials[organ->mat_id] : ray_.media;
 
-                    OrganProperties * organ_properties = static_cast<OrganProperties*>(closestResults.m_collisionObject->getUserPointer());
-                    float acoustic_impedance = organ_properties ? organ_properties->acoustic_impedance : current_acoustic_impedance;
+                    if (render_rays)
+                    {
+                        m_dynamicsWorld->getDebugDrawer()->drawLine(ray_.from,closestResults.m_hitPointWorld,btVector4(1,0,1,1));
+                    }
 
-                    const btVector3 refraction_direction = snells_law(ray_direction, closestResults.m_hitNormalWorld, current_acoustic_impedance, acoustic_impedance);
-                    ray_direction = refraction_direction;
+                    // Substract ray intensity according to distance traveled
+                    {
+                        ray_physics::travel(ray_, distance_in_mm(ray_.from, closestResults.m_hitPointWorld));
+                    }
 
-                    current_acoustic_impedance = acoustic_impedance;
-                    from = closestResults.m_hitPointWorld;
+                    if (ray_.depth < ray::max_depth)
+                    {
+                        // Calculate refraction and reflection directions and intensities
 
-                    collisions[ray_i][hit_i] = closestResults.m_hitPointWorld;
+                        auto result = ray_physics::hit_boundary(ray_, closestResults.m_hitPointWorld, closestResults.m_hitNormalWorld, organ_material);
+
+                        if (result.refraction.intensity > ray::intensity_epsilon)
+                        {
+                            ray_stack.push_back(result.refraction);
+                        }
+
+                        if (result.reflection.intensity > ray::intensity_epsilon)
+                        {
+                            ray_stack.push_back(result.reflection);
+                        }
+                    }
+
+                    // Register collision
+                    collisions[ray_i].push_back(closestResults.m_hitPointWorld);
                 }
                 else
                 {
-                    break;
+                    // Ray did not reach another media, add a data point at its end.
+                    collisions[ray_i].push_back(to);
                 }
             }
         }
 
         // draw
-#if RENDER_RAYS
-        btVector3 red(1,0,0);
-        btVector3 blue(0,0,1);
-
-        for (size_t ray_i = 0; ray_i < ray_count; ray_i++)
+        if (render_hits)
         {
-            for (size_t hit_i = 0; hit_i < max_ray_hits; hit_i++)
+            btVector3 red(1,0,0);
+            btVector3 blue(0,0,1);
+
+            for (auto & collision_vector : collisions)
             {
-                if (collisions[ray_i][hit_i] != empty_vector)
+                for (auto & collision : collision_vector)
                 {
-                    m_dynamicsWorld->getDebugDrawer()->drawSphere(collisions[ray_i][hit_i],0.1,hit_i%2?red:blue);
-                }
-                else
-                {
-                    break;
+                    m_dynamicsWorld->getDebugDrawer()->drawSphere(collision,0.1,red);
                 }
             }
         }
-#endif
     }
 
     const float fps = 1.0f / (float( clock() - frame_start ) /  CLOCKS_PER_SEC);
@@ -305,25 +329,6 @@ void SoftBodyFromObjExample::stepSimulation(float deltaTime)
 {
     castRays();
     CommonRigidBodyBase::stepSimulation(deltaTime);
-}
-
-btVector3 SoftBodyFromObjExample::snells_law(btVector3 ray_direction, btVector3 surface_normal, float refr_index_1, float refr_index_2)
-{
-    // For more details, read https://en.wikipedia.org/wiki/Snell%27s_law#Vector_form
-    float cos_sigma1 = ray_direction.dot(-surface_normal);
-    if (cos_sigma1 < 0.0f)
-    {
-        cos_sigma1 = ray_direction.dot(surface_normal);
-    }
-
-    //btVector3 reflection_dir{ 1 + 2 * cos_sigma1 * surface_normal };
-
-    const btVector3 & l = ray_direction;
-    const btVector3 & n = surface_normal;
-    const float c = cos_sigma1;
-    const float r = refr_index_1 / refr_index_2;
-
-    return btVector3( r * l + (r*c - std::sqrt(1 - r*r * (1 - c*c))) * n );
 }
 
 btSoftBody * SoftBodyFromObjExample::add_softbody_from_obj(const char * fileName, std::array<float, 3> deltas, float scaling)
@@ -438,6 +443,26 @@ btRigidBody * SoftBodyFromObjExample::add_rigidbody_from_obj(const char * fileNa
 //        int renderInstance = m_guiHelper->registerGraphicsInstance(shapeId,pos,orn,color,scaling);
 //        body->setUserIndex(renderInstance);
 //    }
+}
+
+float SoftBodyFromObjExample::distance_in_mm(const btVector3 & v1, const btVector3 & v2) const
+{
+    using namespace std;
+
+    auto x_dist = abs(v1.getX() - v2.getX()) * spacing[0];
+    auto y_dist = abs(v1.getY() - v2.getY()) * spacing[1];
+    auto z_dist = abs(v1.getZ() - v2.getZ()) * spacing[2];
+
+    return sqrt(pow(x_dist,2) + pow(y_dist,2) + pow(z_dist,2));
+}
+
+btVector3 SoftBodyFromObjExample::enlarge(const btVector3 & versor, float mm) const
+{
+    assert(versor.length2() < 1.1f);
+
+    return mm/100.0f * btVector3 ( spacing[0] * versor.getX(),
+                                   spacing[1] * versor.getY(),
+                                   spacing[2] * versor.getZ() );
 }
 
 CommonExampleInterface*    ET_SoftBodyFromObjCreateFunc(CommonExampleOptions& options)
