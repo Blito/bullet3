@@ -210,6 +210,7 @@ void SoftBodyFromObjExample::castRays()
     using namespace ray_physics;
 
     unsigned int tests = 0;
+    unsigned int total_collisions = 0;
     constexpr bool render_rays = false;
     constexpr bool render_hits = false;
     ///step the simulation
@@ -219,7 +220,7 @@ void SoftBodyFromObjExample::castRays()
         btVector3 initial_pos(-14,1.2,-3);
         const float ray_start_step { 0.02f };
 
-        std::array<std::vector<btVector3>, ray_count> collisions;
+        std::array<std::vector<collision>, ray_count> collisions;
         for (auto & collision_vector : collisions)
         {
             collision_vector.reserve(std::pow(2, ray::max_depth));
@@ -240,7 +241,8 @@ void SoftBodyFromObjExample::castRays()
                     0,                                                   // depth
                     materials[material_id::GEL],
                     initial_intensity,
-                    frequency
+                    frequency,
+                    0                                                    // previous ray
                 };
                 ray_stack.push_back(first_ray);
             }
@@ -282,24 +284,27 @@ void SoftBodyFromObjExample::castRays()
 
                         auto result = ray_physics::hit_boundary(ray_, closestResults.m_hitPointWorld, closestResults.m_hitNormalWorld, organ_material);
 
+                        // Register collision
+                        collisions[ray_i].push_back({closestResults.m_hitPointWorld, ray_.parent_collision});
+
+                        // Spawn reflection and refraction rays
                         if (result.refraction.intensity > ray::intensity_epsilon)
                         {
+                            result.refraction.parent_collision = collisions[ray_i].size()-1;
                             ray_stack.push_back(result.refraction);
                         }
 
                         if (result.reflection.intensity > ray::intensity_epsilon)
                         {
+                            result.reflection.parent_collision = collisions[ray_i].size()-1;
                             ray_stack.push_back(result.reflection);
                         }
                     }
-
-                    // Register collision
-                    collisions[ray_i].push_back(closestResults.m_hitPointWorld);
                 }
                 else
                 {
                     // Ray did not reach another media, add a data point at its end.
-                    collisions[ray_i].push_back(to);
+                    collisions[ray_i].push_back({to, ray_.parent_collision});
                 }
             }
         }
@@ -314,14 +319,19 @@ void SoftBodyFromObjExample::castRays()
             {
                 for (auto & collision : collision_vector)
                 {
-                    m_dynamicsWorld->getDebugDrawer()->drawSphere(collision,0.1,red);
+                    m_dynamicsWorld->getDebugDrawer()->drawSphere(collision.position,0.1,red);
                 }
             }
+        }
+
+        for (auto & collision_vector : collisions)
+        {
+            total_collisions += collision_vector.size();
         }
     }
 
     const float fps = 1.0f / (float( clock() - frame_start ) /  CLOCKS_PER_SEC);
-    std::cout << fps << " " << tests << std::endl;
+    std::cout << fps << " " << tests << " " << total_collisions << std::endl;
     frame_start = clock();
 }
 

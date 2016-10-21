@@ -13,9 +13,16 @@ struct ray
     unsigned int depth;
     const material & media;
     float intensity, frequency;
+    unsigned short parent_collision; // position in collision vector
 
     static constexpr unsigned int max_depth = 5;
     static constexpr float intensity_epsilon = 1e-8;
+};
+
+struct collision
+{
+    btVector3 position;
+    unsigned short parent_collision; // position in collision vector
 };
 
 struct hit_result { ray reflection, refraction; };

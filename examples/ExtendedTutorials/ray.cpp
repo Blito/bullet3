@@ -29,9 +29,9 @@ ray_physics::hit_result ray_physics::hit_boundary(const ray & r, const btVector3
     const auto intensity_refr = r.intensity - intensity_refl;
 
     // Add two more rays to the stack
-    ray refraction_ray { hit_point, refraction_direction, r.depth+1, media, intensity_refr > ray::intensity_epsilon ? intensity_refr : 0.0f, r.frequency };
+    ray refraction_ray { hit_point, refraction_direction, r.depth+1, media, intensity_refr > ray::intensity_epsilon ? intensity_refr : 0.0f, r.frequency, 0 };
 
-    ray reflection_ray { hit_point, reflection_direction, r.depth+1, r.media, intensity_refl > ray::intensity_epsilon ? intensity_refl : 0.0f, r.frequency };
+    ray reflection_ray { hit_point, reflection_direction, r.depth+1, r.media, intensity_refl > ray::intensity_epsilon ? intensity_refl : 0.0f, r.frequency, 0 };
 
     return { reflection_ray, refraction_ray };
 }
